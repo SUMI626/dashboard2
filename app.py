@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import re
 import plotly.express as px
@@ -92,14 +93,25 @@ div[data-testid="stVerticalBlockBorderWrapper"] {{
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data
-def load_data(file_path):
+@st.cache_data(ttl=600)
+def load_data_excel(file_path):
     try:
         df = pd.read_excel(file_path)
+        return clean_and_map_data(df)
     except Exception as e:
         return pd.DataFrame(), str(e)
-    
-    # 1. 컬럼명 정제 (공백 제거 등)
+
+def load_data_gsheets(spreadsheet_url):
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        df = conn.read(spreadsheet=spreadsheet_url, ttl=600)
+        return clean_and_map_data(df)
+    except Exception as e:
+        return pd.DataFrame(), f"구글 시트 연결 오류: {str(e)}"
+
+def clean_and_map_data(df):
+    if df.empty:
+        return pd.DataFrame(), "데이터가 비어 있습니다."
     df.columns = df.columns.astype(str).str.strip()
     
     # 필수 컬럼 존재하는지 유연하게 찾기
@@ -277,6 +289,8 @@ def load_data(file_path):
 
 # ================= 차트 유틸리티 및 심층 분석 함수 =================
 
+# ================= 차트 유틸리티 및 심층 분석 함수 =================
+
 def apply_chart_style(fig):
     """범례 크기 조정 및 연결선 제거 등 공통 스타일 적용"""
     fig.update_layout(
@@ -443,19 +457,37 @@ def draw_age_charts(df_data, title_suffix):
 
 st.title("📊 이용자 현황 분석 대시보드")
 
-uploaded_file = st.file_uploader("📂 분석할 엑셀 파일(.xlsx)을 업로드해 주세요 (미업로드 시 기본 실적데이터 사용)", type=['xlsx'])
-
-import os
-if uploaded_file is not None:
-    data_source = uploaded_file
-else:
-    data_source = "2025실적데이터.xlsx"
-    if not os.path.exists(data_source):
-        st.error(f"기본 파일인 '{data_source}'을 찾을 수 없습니다.")
-        st.stop()
+# 데이터 소스 선택 UI
+with st.sidebar:
+    st.image("https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png", width=100) # 구글 로고 (예시)
+    st.markdown("### 🛠️ 데이터 소스 설정")
+    source_option = st.radio(
+        "분석할 데이터를 선택해 주세요:",
+        ["로컬 엑셀 파일", "구글 스프레드시트 (실시간)"],
+        index=0
+    )
+    
+    if source_option == "로컬 엑셀 파일":
+        uploaded_file = st.file_uploader("📂 엑셀 파일 업로드 (.xlsx)", type=['xlsx'])
+        if uploaded_file is not None:
+            data_source = uploaded_file
+        else:
+            data_source = "2025실적데이터.xlsx"
+    else:
+        spreadsheet_url = st.text_input(
+            "🔗 구글 스프레드시트 URL을 입력해 주세요:",
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+        )
+        if not spreadsheet_url:
+            st.warning("⚠️ 구글 스프레드시트 URL을 입력해 주세요.")
+            st.stop()
+        data_source = spreadsheet_url
 
 with st.spinner("데이터를 불러오고 처리하는 중입니다..."):
-    df, col_map = load_data(data_source)
+    if source_option == "로컬 엑셀 파일":
+        df, col_map = load_data_excel(data_source)
+    else:
+        df, col_map = load_data_gsheets(data_source)
 
 if isinstance(col_map, str) or df.empty:
     st.error("⚠️ 데이터 형식을 확인해 주세요. (필수 컬럼이 누락되었거나 데이터를 읽을 수 없습니다)")
